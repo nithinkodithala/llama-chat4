@@ -24,7 +24,6 @@ jobs:
       with:
         java-version: '17'
         distribution: 'temurin'
-        cache: gradle
 
     - name: Set up Android SDK
       uses: android-actions/setup-android@v3
@@ -35,11 +34,19 @@ jobs:
       run: |
         $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125"
 
+    - name: Setup Gradle Wrapper
+      run: |
+        wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip
+        unzip -q gradle-8.7-bin.zip
+        ./gradle-8.7/bin/gradle wrapper --gradle-version 8.7 --no-daemon
+        rm -rf gradle-8.7 gradle-8.7-bin.zip
+        chmod +x ./gradlew
+
     - name: Build Release APK
       run: |
-        chmod +x ./gradlew || true
         export ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125
-        bash ./gradlew assembleRelease
+        export GRADLE_USER_HOME=$HOME/.gradle
+        ./gradlew assembleRelease
 
     - name: Upload APK as Artifact
       uses: actions/upload-artifact@v4

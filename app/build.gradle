@@ -1,10 +1,10 @@
 plugins {
     id 'com.android.application'
     id 'kotlin-android'
-    id 'cmake'
 }
 
 android {
+    namespace 'com.llamachat.app'
     compileSdk 34
     ndkVersion "26.1.10909125"
 
@@ -48,7 +48,7 @@ android {
 
     externalNativeBuild {
         cmake {
-            path file('CMakeLists.txt')
+            path file('../CMakeLists.txt')
         }
     }
 }
