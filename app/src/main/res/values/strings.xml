@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Llama Chat</string>
+    <string name="app_description">Run AI models locally on your Android device</string>
+    
+    <!-- Main Activity -->
+    <string name="send">Send</string>
+    <string name="download_model">Download Model</string>
+    <string name="enter_prompt">Enter your prompt...</string>
+    <string name="loading">Loading...</string>
+    <string name="ready">Ready</string>
+    
+    <!-- Download Activity -->
+    <string name="download">Download</string>
+    <string name="back">Back</string>
+    <string name="paste_url">Paste a HuggingFace GGUF model URL below</string>
+    <string name="downloading">Downloading: %d MB / %d MB</string>
+    <string name="download_error">Download error: %s</string>
+    <string name="download_complete">Download complete!</string>
+</resources>
