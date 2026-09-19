@@ -1,34 +1,28 @@
 cmake_minimum_required(VERSION 3.21)
-project(llama)
+project(llama_android)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# JNI interface
-find_package(JNI REQUIRED)
+# Disable unnecessary llama.cpp targets
+set(LLAMA_BUILD_TESTS OFF CACHE BOOL "")
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "")
+set(LLAMA_BUILD_SERVER OFF CACHE BOOL "")
 
-# Add llama.cpp sources
-set(LLAMA_CPP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp")
+# Use the upstream CMakeLists.txt so it handles all version header generation properly
+add_subdirectory(llama.cpp)
 
-add_library(llama SHARED
-    "${LLAMA_CPP_DIR}/ggml.c"
-    "${LLAMA_CPP_DIR}/llama.cpp"
+add_library(llama_android SHARED
     "app/src/main/cpp/llama_jni.cpp"
 )
 
-target_include_directories(llama PRIVATE
-    ${LLAMA_CPP_DIR}
-    ${JNI_INCLUDE_DIRS}
+target_include_directories(llama_android PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/llama.cpp/include"
 )
 
-target_compile_options(llama PRIVATE
-    -O3
-    -ffast-math
-    -march=native
-)
-
-# Link against Android libraries
-target_link_libraries(llama
+# Link our JNI library against the core llama target
+target_link_libraries(llama_android
+    llama
     android
     log
     m

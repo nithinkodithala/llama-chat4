@@ -2,7 +2,7 @@
 #include <cstring>
 #include <vector>
 #include <sstream>
-#include "../../../../../../../llama.cpp/llama.h"
+#include "llama.h"
 
 struct LlamaContext {
     llama_context* ctx;

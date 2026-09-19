@@ -70,7 +70,7 @@ class LlamaModel(modelPath: String) {
     companion object {
         init {
             try {
-                System.loadLibrary("llama")
+                System.loadLibrary("llama_android")
             } catch (e: UnsatisfiedLinkError) {
                 throw RuntimeException("Failed to load native llama library", e)
             }
