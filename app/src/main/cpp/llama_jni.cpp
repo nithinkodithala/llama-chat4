@@ -7,6 +7,7 @@
 struct LlamaContext {
     llama_context* ctx;
     llama_model* model;
+    llama_sampler* smpl;
 };
 
 extern "C" {
@@ -29,7 +30,7 @@ Java_com_llamachat_app_ml_LlamaModel_00024Companion_loadModel(
 
         // Load model
         llama_model_params model_params = llama_model_default_params();
-        llama_model* model = llama_load_model_from_file(model_path, model_params);
+        llama_model* model = llama_model_load_from_file(model_path, model_params);
         
         if (!model) {
             env->ReleaseStringUTFChars(model_path_j, model_path);
@@ -42,16 +43,21 @@ Java_com_llamachat_app_ml_LlamaModel_00024Companion_loadModel(
         ctx_params.n_threads = 4;  // Use 4 threads
         ctx_params.n_threads_batch = 4;
         
-        llama_context* ctx = llama_new_context_with_model(model, ctx_params);
+        llama_context* ctx = llama_init_from_model(model, ctx_params);
         
         if (!ctx) {
-            llama_free_model(model);
+            llama_model_free(model);
             env->ReleaseStringUTFChars(model_path_j, model_path);
             return 0;
         }
 
+        // Create a default sampler chain (will be reconfigured per-inference)
+        auto sparams = llama_sampler_chain_default_params();
+        llama_sampler* smpl = llama_sampler_chain_init(sparams);
+        llama_sampler_chain_add(smpl, llama_sampler_init_dist(0));
+
         // Create context wrapper and return handle
-        LlamaContext* wrapper = new LlamaContext{ctx, model};
+        LlamaContext* wrapper = new LlamaContext{ctx, model, smpl};
         env->ReleaseStringUTFChars(model_path_j, model_path);
         return reinterpret_cast<jlong>(wrapper);
     } catch (const std::exception& e) {
@@ -71,11 +77,14 @@ Java_com_llamachat_app_ml_LlamaModel_00024Companion_unloadModel(
 ) {
     LlamaContext* wrapper = reinterpret_cast<LlamaContext*>(native_handle);
     if (wrapper) {
+        if (wrapper->smpl) {
+            llama_sampler_free(wrapper->smpl);
+        }
         if (wrapper->ctx) {
             llama_free(wrapper->ctx);
         }
         if (wrapper->model) {
-            llama_free_model(wrapper->model);
+            llama_model_free(wrapper->model);
         }
         delete wrapper;
         llama_backend_free();
@@ -104,23 +113,43 @@ Java_com_llamachat_app_ml_LlamaModel_00024Companion_nativeInference(
     const char* prompt_str = env->GetStringUTFChars(prompt_j, nullptr);
     
     try {
-        // Tokenize prompt
-        std::vector<llama_token> tokens = llama_tokenize(
-            wrapper->model,
-            prompt_str,
-            true
-        );
+        // Get the vocabulary from the model
+        const llama_vocab* vocab = llama_model_get_vocab(wrapper->model);
 
-        // Clear context
-        llama_kv_cache_clear(wrapper->ctx);
+        // Tokenize prompt using the new 7-arg API
+        // First call with nullptr to get the required token count
+        int n_tokens = llama_tokenize(vocab, prompt_str, strlen(prompt_str), nullptr, 0, true, true);
+        // n_tokens is negative, indicating the required buffer size
+        std::vector<llama_token> tokens(std::abs(n_tokens));
+        n_tokens = llama_tokenize(vocab, prompt_str, strlen(prompt_str), tokens.data(), tokens.size(), true, true);
+        if (n_tokens < 0) {
+            env->ReleaseStringUTFChars(prompt_j, prompt_str);
+            return false;
+        }
+        tokens.resize(n_tokens);
 
-        // Evaluate initial tokens
+        // Clear KV cache
+        llama_kv_self_clear(wrapper->ctx);
+
+        // Evaluate initial tokens in batches
         for (int i = 0; i < (int)tokens.size(); i += 32) {
             int n_eval = std::min(32, (int)tokens.size() - i);
-            if (llama_decode(wrapper->ctx, llama_batch_get_one(&tokens[i], n_eval, 0, 0)) != 0) {
+            if (llama_decode(wrapper->ctx, llama_batch_get_one(&tokens[i], n_eval)) != 0) {
                 env->ReleaseStringUTFChars(prompt_j, prompt_str);
                 return false;
             }
+        }
+
+        // Reconfigure the sampler chain with the requested parameters
+        llama_sampler_free(wrapper->smpl);
+        auto sparams = llama_sampler_chain_default_params();
+        wrapper->smpl = llama_sampler_chain_init(sparams);
+        if (temperature > 0.0f) {
+            llama_sampler_chain_add(wrapper->smpl, llama_sampler_init_top_p(top_p, 1));
+            llama_sampler_chain_add(wrapper->smpl, llama_sampler_init_temp(temperature));
+            llama_sampler_chain_add(wrapper->smpl, llama_sampler_init_dist(0));
+        } else {
+            llama_sampler_chain_add(wrapper->smpl, llama_sampler_init_greedy());
         }
 
         // Get callback method
@@ -133,20 +162,17 @@ Java_com_llamachat_app_ml_LlamaModel_00024Companion_nativeInference(
 
         // Generate new tokens
         for (int i = 0; i < max_tokens; i++) {
-            // Sample next token
-            llama_token next_token = llama_sampler_sample_and_accept(
-                nullptr,
-                wrapper->ctx,
-                nullptr
-            );
+            // Sample next token using the sampler chain
+            llama_token next_token = llama_sampler_sample(wrapper->smpl, wrapper->ctx, -1);
 
-            if (next_token == llama_token_eos(wrapper->model)) {
+            // Check for end of generation
+            if (llama_vocab_is_eog(vocab, next_token)) {
                 break;
             }
 
             // Convert token to string
             char token_str[128];
-            int n = llama_token_to_piece(wrapper->model, next_token, token_str, sizeof(token_str), 0, true);
+            int n = llama_token_to_piece(vocab, next_token, token_str, sizeof(token_str), 0, true);
             
             if (n > 0) {
                 // Call Java callback with token
@@ -156,7 +182,7 @@ Java_com_llamachat_app_ml_LlamaModel_00024Companion_nativeInference(
             }
 
             // Prepare for next token
-            if (llama_decode(wrapper->ctx, llama_batch_get_one(&next_token, 1, tokens.size() + i, 0)) != 0) {
+            if (llama_decode(wrapper->ctx, llama_batch_get_one(&next_token, 1)) != 0) {
                 break;
             }
         }

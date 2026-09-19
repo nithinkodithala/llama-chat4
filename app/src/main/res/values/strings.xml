@@ -14,7 +14,7 @@
     <string name="download">Download</string>
     <string name="back">Back</string>
     <string name="paste_url">Paste a HuggingFace GGUF model URL below</string>
-    <string name="downloading">Downloading: %d MB / %d MB</string>
+    <string name="downloading">Downloading: %1$d MB / %2$d MB</string>
     <string name="download_error">Download error: %s</string>
     <string name="download_complete">Download complete!</string>
 </resources>
